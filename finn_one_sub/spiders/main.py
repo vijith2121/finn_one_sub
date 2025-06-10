@@ -4,6 +4,7 @@ from lxml import html
 import os
 from email import message_from_string
 from email.policy import default
+from datetime import date
 
 
 class Finn_one_subSpider(scrapy.Spider):
@@ -143,6 +144,7 @@ class Finn_one_subSpider(scrapy.Spider):
         cif_cid = ''.join(
             [i.strip() for i in cif_cid if i.strip()]
         ) if cif_cid else ''
+        scrape_date = date.today()
         data = {
             'Overdue_Since': Overdue_Since,
             'No_of_Installments_Overdue': No_of_Installments_Overdue,
