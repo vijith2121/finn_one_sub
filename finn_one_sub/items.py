@@ -12,7 +12,7 @@ class Product(scrapy.Item):
     Last_Payment_Amount = scrapy.Field()
     Bucket = scrapy.Field()
     cif_cid = scrapy.Field()
-
+    # customer_name = scrapy.Field()
     Account_no = scrapy.Field()
     Product_Type = scrapy.Field()
     Application_ID = scrapy.Field()
@@ -44,6 +44,8 @@ class Product(scrapy.Item):
     Interest_Outstanding_Amount = scrapy.Field()
     Interest_Overdue_Amount = scrapy.Field()
     Late_Fees = scrapy.Field()
+    scrape_date = scrapy.Field()
 
-# class Product(scrapy.Item):
+
+# class product_items(scrapy.Item):
 #     res = scrapy.Field()

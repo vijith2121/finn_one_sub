@@ -9,7 +9,7 @@ from datetime import date
 
 class Finn_one_subSpider(scrapy.Spider):
     name = "finn_one_sub"
-    
+
     # def start_requests(self):
     #     folder_path = os.path.dirname(os.path.abspath(__file__))
     #     for file_name in os.listdir(folder_path):
@@ -23,7 +23,7 @@ class Finn_one_subSpider(scrapy.Spider):
     #                 url=file_path,
     #                 callback=self.parse,
     #             )
-    
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.finn_uae_list = []       # For main files
@@ -48,22 +48,27 @@ class Finn_one_subSpider(scrapy.Spider):
                         'raw_mhtml': content
                     }
                 )
-                
+
     def parse(self, response):
         # and '_account' in file_name
         file_name = response.meta.get('file_name')
         finn_uae_list, finn_uae_sub_list = [], []
         if file_name:
             
-            if '_Account' in file_name:
-                finn_uae = self.parse1(response)
-                # print('==============', finn_uae)
+            if '_Account' in file_name or '_account' in file_name:
+                finn_uae = self.parse1(response, response.meta)
                 if finn_uae:
                 # yield Product(**{'res': finn_uae})
+                    print('finn_uae===========================')
+                    print(finn_uae)
+                    print('=============================')
                     self.finn_uae_list.append(finn_uae)
-            elif '_Overdue' in file_name:
+            elif '_Overdue' in file_name or '_overdue' in file_name:
                 finn_uae_sub = self.parse2(response, response.meta)
                 if finn_uae_sub:
+                    print('finn_uae_sub===========================')
+                    print(finn_uae_sub)
+                    print('=============================')
                     self.finn_uae_sub_list.append(finn_uae_sub)
             # else:
             #     finn_uae_sub = self.parse2(response, response.meta)
@@ -75,11 +80,11 @@ class Finn_one_subSpider(scrapy.Spider):
 
             if self.finn_uae_list and self.finn_uae_sub_list:
                 for item in self.generate_items():
-                    # yield Product(**item)
-                    print(item)
+                    yield Product(**item)
             else:
                 print("No data found in one or both lists")
-    
+
+
     def parse2(self, response, meta):
         mhtml_raw = meta['raw_mhtml']
 
@@ -150,114 +155,161 @@ class Finn_one_subSpider(scrapy.Spider):
             'No_of_Installments_Overdue': No_of_Installments_Overdue,
             'Installment_Start_Date': Installment_Start_Date,
             'Installment_Overdue': Installment_Overdue,
-            'Principal_Overdue': Principal_Overdue,
-            'Interest_Overdue': Interest_Overdue,
+            'Principal_Overdue': Principal_Overdue.split()[0].strip() if Principal_Overdue else '',
+            'Interest_Overdue': Interest_Overdue.split()[0].strip() if Interest_Overdue else '',
             'Charges_Overdue': Charges_Overdue,
             'Last_Payment_Date': Last_Payment_Date,
             'Last_Payment_Amount': Last_Payment_Amount,
             'Bucket': Bucket,
-            'Account_no': Account_no,
-            'cif_cid': cif_cid if cif_cid else ''
+            # 'Account_no': Account_no,
+            'Account_no': f"'{Account_no}" if Account_no else '',
+            'cif_cid': cif_cid if cif_cid else '',
+            'scrape_date': str(scrape_date)
         }
         return data
+
+    def parse1(self, response, meta):
+        import quopri
+
+        mhtml_raw = meta['raw_mhtml']
+
+        # Step 1: Parse as email
+        msg = message_from_string(mhtml_raw, policy=default)
+
+        html_body = None
+        if msg.is_multipart():
+            for part in msg.walk():
+                if part.get_content_type() == 'text/html':
+                    raw_html = part.get_payload(decode=True)  # bytes
+                    html_body = quopri.decodestring(raw_html).decode('utf-8', errors='ignore')
+                    break
+        else:
+            if msg.get_content_type() == 'text/html':
+                raw_html = msg.get_payload(decode=True)
+                html_body = quopri.decodestring(raw_html).decode('utf-8', errors='ignore')
+
+        if not html_body:
+            self.logger.warning("No HTML content found")
+            return
+
+        import re
+
+        # Step 2: parse with lxml
+        parser = html.fromstring(html_body)
+
+        Account_no = parser.xpath("//div[@id='selectedLoanNo_chosen']//span//text()")
+        Account_no = ''.join(Account_no).strip()
+        # print(parser.xpath("//div[@id='selectedLoanNo_chosen']//span//text()"))
+
+        Product_Type = parser.xpath("//b[text()='Product Type']//parent::div/div//text()") or parser.xpath('//div[@code="cardType"]//div[2]//text()')
+        Product_Type = ''.join(Product_Type).replace('\xa0', '').strip()
+
+        Application_ID = parser.xpath('//div[@code="applicationId"]//div[2]//text()')
+        Application_ID = ''.join(Application_ID).strip()
+
+        Net_Disbursal_Amount = parser.xpath("//b[contains(text(), 'Net Disbursal Amount')]//parent::div/div//text()")
+        Net_Disbursal_Amount = ''.join(Net_Disbursal_Amount).strip()
+
+        product = parser.xpath("//b[text()='Product']//parent::div/div//text()") or parser.xpath('//div[@code="product"]//div[2]//text()')
+        product = ''.join(product).replace('\xa0', '').replace('&nbsp;', '').strip()
+
+        Branch_Code = parser.xpath("//b[contains(text(), 'Branch Code')]//parent::div/div//text()") or parser.xpath('//div[@code="branchCode"]//div[2]//text()')
+        Branch_Code = ''.join(Branch_Code).strip()
+
+        Frequency = parser.xpath("//b[contains(text(), 'Frequency')]//parent::div/div//text()")
+        Frequency = ''.join(Frequency).strip()
+
+        Scheme = parser.xpath("//b[contains(text(), 'Scheme')]//parent::div/div//text()")
+        Scheme = ''.join(Scheme).strip()
+
+        Loan_Disbursed = parser.xpath("//b[contains(text(), 'Loan Disbursed')]//parent::div/div//text()") or parser.xpath('//div[@code="loanDisbursed"]//div[2]//text()')
+        Loan_Disbursed = ''.join(Loan_Disbursed).strip()
+
+        Next_Due_Amount = parser.xpath("//b[contains(text(), 'Next Due Amount')]//parent::div/div//text()") or parser.xpath('//div[@code="nextDueAmount"]//div[2]//text()') # nextDueAmount
+        Next_Due_Amount = ''.join(Next_Due_Amount).strip()
         
-    
-    
-    def parse1(self, response):
-        parser = html.fromstring(response.text)
-        Account_no = ''.join(
-            parser.xpath("//b[contains(text(), 'Account No.')]//parent::div/div//text()")
-        ).strip()
-        Product_Type = ''.join(
-            parser.xpath("//b[text()='Product Type']//parent::div/div//text()")
-        ).strip()
-        Application_ID = ''.join(
-            parser.xpath("//b[contains(text(), 'Application ID')]//parent::div/div//text()")
-        ).strip()
-        Net_Disbursal_Amount = ''.join(
-            parser.xpath("//b[contains(text(), 'Net Disbursal Amount')]//parent::div/div//text()")
-        ).strip()
-        product = ''.join(
-            parser.xpath("//b[text()='Product']//parent::div/div//text()")
-        ).strip()
-        Branch_Code = ''.join(
-            parser.xpath("//b[contains(text(), 'Branch Code')]//parent::div/div//text()")
-        ).strip()
-        Frequency = ''.join(
-            parser.xpath("//b[contains(text(), 'Frequency')]//parent::div/div//text()")
-        ).strip()
-        Scheme = ''.join(
-            parser.xpath("//b[contains(text(), 'Scheme')]//parent::div/div//text()")
-        ).strip()
-        Loan_Disbursed = ''.join(
-            parser.xpath("//b[contains(text(), 'Loan Disbursed')]//parent::div/div//text()")
-        ).strip()
-        Next_Due_Amount = ''.join(
-            parser.xpath("//b[contains(text(), 'Next Due Amount')]//parent::div/div//text()")
-        ).strip()
-        Installment_Amount = ''.join(
-            parser.xpath("//b[contains(text(), 'Installment Amount')]//parent::div/div//text()")
-        ).strip()
-        Billed_Amount = ''.join(
-            parser.xpath("//b[contains(text(), 'Billed Amount')]//parent::div/div//text()")
-        ).strip()
-        Balance_O_S = ''.join(
-            parser.xpath("//b[contains(text(), 'Balance O/S')]//parent::div/div//text()")
-        ).strip()
+
+        Installment_Amount = parser.xpath("//b[contains(text(), 'Installment Amount')]//parent::div/div//text()")
+        Installment_Amount = ''.join(Installment_Amount).strip()
+
+        Billed_Amount = parser.xpath("//b[contains(text(), 'Billed Amount')]//parent::div/div//text()")
+        Billed_Amount = ''.join(Billed_Amount).strip()
+
+        Balance_O_S = parser.xpath("//b[contains(text(), 'Balance O/S')]//parent::div/div//text()") or parser.xpath('//div[@code="balanceoutstanding"]//div[2]//text()')
+        Balance_O_S = ''.join(Balance_O_S).strip()
+
+        
         Principal_Outstanding = ''.join(
             parser.xpath("//b[text()='Principal Outstanding ']//parent::div//div//text()")
         ).strip()
+
         Interest_Outstanding = ''.join(
             parser.xpath("//b[text()='Interest Outstanding ']//parent::div/div//text()")
         ).strip()
-        Next_Due_Date = ''.join(
-            parser.xpath("//b[contains(text(), 'Next Due Date')]//parent::div/div//text()")
-        ).strip()
+
+        Next_Due_Date = parser.xpath("//b[contains(text(), 'Next Due Date')]//parent::div/div//text()") or parser.xpath('//div[@code="nextDueDate"]//div[2]//text()')
+        Next_Due_Date = ''.join(Next_Due_Date).strip()
+
+
         Interest_Type = ''.join(
             parser.xpath("//b[contains(text(), 'Interest Type')]//parent::div/div//text()")
         ).strip()
-        Interest_Rate_percentage = ''.join(
-            parser.xpath("//b[contains(text(), 'Interest Rate')]//parent::div/div//text()")
-        ).strip()
+
+        Interest_Rate_percentage = parser.xpath("//b[contains(text(), 'Interest Rate')]//parent::div/div//text()") or parser.xpath('//div[@code="interestrate"]//div[2]//text()')
+        Interest_Rate_percentage = ''.join(Interest_Rate_percentage).strip()
+
+        
         Tenure = ''.join(
             parser.xpath("//b[contains(text(), 'Tenure')]//parent::div/div//text()")
         ).strip()
+
         Account_Status = ''.join(
             parser.xpath("//b[contains(text(), 'Account Status')]//parent::div/div//text()")
         ).strip()
+
         Non_Instrument_Based_Repayment = ''.join(
             parser.xpath("//b[contains(text(), 'Non Instrument Based Repayment')]//parent::div/div//text()")
         ).strip()
+
         Last_Bounce_Date = ''.join(
             parser.xpath("//b[contains(text(), 'Last Bounce Date')]//parent::div/div//text()")
         ).strip()
+
         Written_Off_Amount = ''.join(
             parser.xpath("//b[contains(text(), 'Written Off Amount')]//parent::div/div//text()")
         ).strip()
+
         Total_Repayment_Amount = ''.join(
             parser.xpath("//b[contains(text(), 'Total Repayment Amount')]//parent::div/div//text()")
         ).strip()
+
         Maturity_Date = ''.join(
             parser.xpath("//b[contains(text(), 'Maturity Date')]//parent::div/div//text()")
         ).strip()
+
         Disbursal_Date = ''.join(
             parser.xpath("//b[contains(text(), 'Disbursal Date')]//parent::div/div//text()")
         ).strip()
-        Principal_Outstanding_Amount = ''.join(
-            parser.xpath("//b[text()='Principal Outstanding Amount']//parent::div/div//text()")
-        ).strip()
-        Principal_Overdue = ''.join(
-            parser.xpath("//b[contains(text(), 'Principal Overdue')]//parent::div/div//text()")
-        ).strip()
-        Interest_Outstanding_Amount = ''.join(
-            parser.xpath("//b[contains(text(), 'Interest Outstanding Amount')]//parent::div/div//text()")
-        ).strip()
-        Interest_Overdue_Amount = ''.join(
-            parser.xpath("//b[contains(text(), 'Interest Overdue Amount')]//parent::div/div//text()")
-        ).strip()
-        Late_Fees = ''.join(
-            parser.xpath("//b[contains(text(), 'Late Fees')]//parent::div/div//text()")
-        ).strip()
+
+        
+        Principal_Outstanding_Amount = parser.xpath("//b[text()='Principal Outstanding Amount']//parent::div/div//text()") or parser.xpath('//div[@code="principalOs"]//div[2]//text()')
+        Principal_Outstanding_Amount = ''.join(Principal_Outstanding_Amount).strip()
+
+        
+        Principal_Overdue = parser.xpath("//b[contains(text(), 'Principal Overdue')]//parent::div/div//text()") or parser.xpath('//div[@code="principalOd"]//div[2]//text()')
+        Principal_Overdue = ''.join(Principal_Overdue).strip()
+
+        Interest_Outstanding_Amount = parser.xpath("//b[contains(text(), 'Interest Outstanding Amount')]//parent::div/div//text()") or parser.xpath('//div[@code="interestOs"]//div[2]//text()')
+        Interest_Outstanding_Amount = ''.join(Interest_Outstanding_Amount).strip()
+
+        # lateFees
+        # parser.xpath('//div[@code="lateFees"]//div[2]//text()')
+        Interest_Overdue_Amount = parser.xpath("//b[contains(text(), 'Interest Overdue Amount')]//parent::div/div//text()") or parser.xpath('//div[@code="interestOd"]//div[2]//text()')
+        Interest_Overdue_Amount = ''.join(Interest_Overdue_Amount).strip()
+
+        Late_Fees = parser.xpath("//b[contains(text(), 'Late Fees')]//parent::div/div//text()") or parser.xpath('//div[@code="lateFees"]//div[2]//text()')
+        Late_Fees = ''.join(Late_Fees).strip()
+
         cif_cid = ''.join(
             parser.xpath("//label[contains(text(), 'CIF#')]//parent::div/text()")
         )
@@ -265,7 +317,8 @@ class Finn_one_subSpider(scrapy.Spider):
             [i.strip() for i in cif_cid if i.strip()]
         ) if cif_cid else ''
         data = {
-            'Account_no': Account_no if Account_no else '',
+            'Account_no': f"'{Account_no}" if Account_no else '',
+            # 'customer_name': customer_name if customer_name else '',
             'Product_Type': Product_Type if Product_Type else '',
             'Application_ID': Application_ID if Application_ID else '',
             'Net_Disbursal_Amount': Net_Disbursal_Amount if Net_Disbursal_Amount else '',
@@ -292,11 +345,11 @@ class Finn_one_subSpider(scrapy.Spider):
             'Maturity_Date': Maturity_Date if Maturity_Date else '',
             'Disbursal_Date': Disbursal_Date if Disbursal_Date else '',
             'Principal_Outstanding_Amount': Principal_Outstanding_Amount if Principal_Outstanding_Amount else '',
-            'Principal_Overdue': Principal_Overdue if Principal_Overdue else '',
+            'Principal_Overdue': Principal_Overdue.split()[0].strip() if Principal_Overdue else '',
             'Interest_Outstanding_Amount': Interest_Outstanding_Amount if Interest_Outstanding_Amount else '',
             'Interest_Overdue_Amount': Interest_Overdue_Amount if Interest_Overdue_Amount else '',
             'Late_Fees': Late_Fees if Late_Fees else '',
-            'cif_cid': cif_cid if cif_cid else ''
+            'cif_cid': cif_cid.replace('=09', '') if cif_cid else '',
         }
         # yield Product(**data)
         return data
@@ -309,4 +362,6 @@ class Finn_one_subSpider(scrapy.Spider):
                     if main.get('Account_no') in sub.get('Account_no'):
                         combined = {**main, **sub}
                         items.append(combined)
+                        # return
+                        # brea
         return items  # Always returns an empty list if no matches
